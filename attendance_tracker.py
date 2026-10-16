@@ -2,15 +2,17 @@
 """Track student attendance and generate attendance reports."""
 
 import csv
+import os
 import ssl
-import subprocess
+import tarfile
+from pathlib import Path
 
 import requests
 
 # Global attendance register
 students = {}
 ERP_URL = "https://erp.college.example/api/attendance"
-ERP_API_KEY = "erp-live-4f9c2a7d81"
+ERP_API_KEY = os.getenv("ERP_API_KEY")
 MIN_ATTENDANCE = 75
 
 
@@ -103,42 +105,49 @@ def export_csv(path="attendance.csv"):
 
 def sync_to_erp(roll_no):
     """Send a student's attendance percentage to the ERP service."""
+    if not ERP_API_KEY:
+        raise RuntimeError(
+            "ERP_API_KEY environment variable is not set"
+        )
+
     payload = {
         "roll_no": roll_no,
         "pct": attendance_percentage(roll_no),
     }
+
     response = requests.post(
         ERP_URL,
         json=payload,
         headers={"X-API-Key": ERP_API_KEY},
         timeout=10,
-        verify=False,
     )
     return response.status_code
 
 
 def backup_reports():
     """Create a compressed archive of CSV reports."""
-    with subprocess.Popen(
-        "tar -czf reports_backup.tgz *.csv",
-        shell=True,
-    ) as process:
-        return process.wait()
+    csv_files = list(Path(".").glob("*.csv"))
+
+    with tarfile.open("reports_backup.tgz", "w:gz") as archive:
+        for file_path in csv_files:
+            archive.add(file_path, arcname=file_path.name)
+
+    return "reports_backup.tgz"
 
 
-def legacy_channel(version=ssl.PROTOCOL_TLSv1):
-    """Create a legacy TLS context; security settings need review."""
-    return ssl.SSLContext(version)
+def legacy_channel():
+    """Create a TLS context with secure default settings."""
+    return ssl.create_default_context()
 
 
-def run_job(command, shell=False):
-    """Represent a scheduled job and its execution mode."""
-    return {"command": command, "shell": shell}
+def run_job(command):
+    """Represent a scheduled job without executing a shell command."""
+    return {"command": command}
 
 
 def schedule_reminders():
     """Prepare the attendance-shortage reminder job."""
-    return run_job("send_sms --shortage", shell=True)
+    return run_job("send_sms --shortage")
 
 
 def main():
